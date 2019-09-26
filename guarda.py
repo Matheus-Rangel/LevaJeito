@@ -11,10 +11,10 @@ def hash():
 def set_hash_action(hash_type : str):
     class setHashAction(argparse.Action):
         def __call__(self, parser, namespace, values, option_string=None):
-            value = values[0]
             if hash_type == "hash":
                 hash_func = hash
             else:
+                value = values[0]
                 hash_func = hmac(value)
             setattr(namespace, "hash_func", hash_func)
     return setHashAction
