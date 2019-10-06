@@ -1,94 +1,87 @@
-import argparse
 import sys
 import json
 import os
+import hashlib
+import shutil
+
+class GuardaHash:
+    def __init__(self, password: str = ""):
+        self.password = password
+
+    def hash(self, b: bytes):
+        m = hashlib.sha256()
+        m.update(b)
+        m.update(self.password.encode('utf-8'))
+        return m.digest().hex()
 
 
+class Guarda:
+    def __init__(self, guarda_hash: GuardaHash, dir_path):
+        self._guarda_hash = guarda_hash
+        self._dir_path = dir_path
+        self._hash_path = os.path.join(self.update_guardadir(), 'guarda.json')
 
+    def inspect(self):
+        hashs = {}
+        for root, dirs, files in os.walk(self._dir_path):
+            if root.startswith(os.path.join(self._dir_path, "guarda")):
+                continue
+            for file in files:
+                path_file = os.path.join(root, file)
+                h = self._guarda_hash.hash(open(path_file, mode='rb').read())
+                hashs[path_file] = h
+        json.dump(hashs, open(self._hash_path, mode='w'), indent=4)
+        for key in hashs:
+            print(key + ": " + hashs[key])
 
-def hash():
-    print(None)
+    def tracking(self):
+        files_hash = self.read_hash()
+        result = ""
+        for root, dirs, files in os.walk(self._dir_path):
+            if root.startswith(os.path.join(self._dir_path, "guarda")):
+                continue
+            for file in files:
+                file_path = os.path.join(root, file)
+                h = self._guarda_hash.hash(open(file_path, mode='rb').read())
+                if file_path in files_hash.keys():
+                    old_h = files_hash[file_path]
+                    files_hash.pop(file_path)
+                    if h != old_h:
+                        result += f"[ALTERADO] {file_path}\n"
+                else:
+                    result += f"[NOVO] {file_path}\n"
+        for deleted_file_path in files_hash.keys():
+            result += f"[REMOVIDO] {deleted_file_path}\n"
+        if not result:
+            print("Nenhuma alteração detectada.")
+            return
+        print("Arquivos modificados: ")
+        print(result)
 
-def hmac(password):
-    def hmac_i():
-        print(password)
+    def untracking(self):
+        shutil.rmtree(os.path.join(self._dir_path, 'guarda'), ignore_errors=True)
+        print("Guarda desativada.")
 
-    return hmac_i
+    def read_hash(self):
+        if os.path.isfile(self._hash_path):
+            try:
+                files_hashs = json.load(open(self._hash_path, mode='rb'))
+            except json.JSONDecodeError:
+                print('Erro na leitura do arquivo de hash, criando novo arquivo.')
+                json.dump({}, open(self._hash_path, mode='w'))
+                files_hashs = {}
+        else:
+            json.dump({}, open(self._hash_path, mode='w'))
+            files_hashs = {}
+        return files_hashs
 
-def set_hash_action(hash_type: str):
-    class SetHashAction(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string=None):
-            if hash_type == "hash":
-                hash_func = hash
-            else:
-                value = values[0]
-                hash_func = hmac(value)
-            setattr(namespace, "hash_func", hash_func)
-
-    return SetHashAction
-
-
-def set_directory(opcao: str):
-    class SetDirectoryAction(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string=None):
-            value = {'opcao': opcao, 'directory': values[0]}
-            setattr(namespace, "opcao", value)
-
-    return SetDirectoryAction
-
-
-def parse_args(argv):
-    parser = argparse.ArgumentParser(description="Guarda verificar arquivos")
-    metodo = parser.add_mutually_exclusive_group(required=True)
-    metodo.add_argument('-hash', nargs=0, action=set_hash_action("hash"),
-                        help="Utilizar a função de hash SHA256")
-    metodo.add_argument('-hmac', nargs=1, metavar='SENHA', action=set_hash_action("hmac"),
-                        help="Utilizar a funcao de hash SHA256 com senha para autenticacao")
-    opcao = parser.add_mutually_exclusive_group(required=True)
-    opcao.add_argument('-i', nargs=1, metavar='PASTA', action=set_directory('-i'),
-                       help=" inicia a guarda da pasta indicada em <pasta>, ou seja, faz a leitura de todos os "
-                            "arquivos da pasta (recursivamente) registrando os dados e Hash/HMAC")
-    opcao.add_argument('-t', nargs=1, metavar='PASTA', action=set_directory('-t'),
-                       help=" faz o rastreio (tracking) da pasta indicada em <pasta>, inserindo informações sobre "
-                            "novos arquivos e indicando alterações detectadas/exclusões")
-    opcao.add_argument('-x', nargs=1, metavar='PASTA', action=set_directory('-x'),
-                       help="Desativa a guarda e remove a estrutura alocada")
-    parser.add_argument('-o', type=str, nargs=1, dest='saida', help="Arquivo de saida do relatorio, "
-                                                                    "por padrao o relatorio será exibido no terminal")
-    return parser.parse_args(argv[1:])
-
-def guarda(dir_path, hash_path):
-    hashs = []
-
-def tracking(dir_path, files_hash):
-    pass
-def untracking(dir_path, hash_path):
-    pass
-
-
-def read_hash(hash_dir):
-    hash_path = os.path.join(hash_dir, 'guarda.json')
-    if os.path.isfile(hash_path):
+    def update_guardadir(self):
+        if not os.path.isdir(self._dir_path):
+            print(self._dir_path + " nao é um diretorio.")
+            sys.exit(1)
+        hash_dir = os.path.join(self._dir_path, 'guarda')
         try:
-            files_hashs = json.load(hash_path)
-        except json.JSONDecodeError:
-            print('Decoding hash error, creating new hash')
-            files_hashs = json.dump([], hash_path)
-    else:
-        files_hashs = json.dump([], hash_path)
-    return files_hashs
-
-def update_guardadir(dir_path):
-    if not os.path.isdir(dir_path):
-        print(dir_path + "is not a directory.")
-        sys.exit(1)
-    hash_dir = os.path.join(dir_path, 'guarda')
-    try:
-        os.mkdir(hash_dir)
-    except FileExistsError:
-        pass
-    return hash_dir
-if __name__ == "__main__":
-    args = parse_args(sys.argv)
-    hashs, hash_path = update_guardadir(args.dir_path)
-    print(args)
+            os.mkdir(hash_dir)
+        except FileExistsError:
+            pass
+        return hash_dir
